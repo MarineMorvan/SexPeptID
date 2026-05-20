@@ -1,4 +1,4 @@
-# UntargetedPaleoproteomicsSexIdentification
+# SexPeptID
 
 This open-sourced script enable sex identification from dental enamel based on untargeted paleoproteomics data (DDA).
 
