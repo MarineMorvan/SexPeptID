@@ -3,9 +3,9 @@ library(dplyr)
 library(ggplot2)
 library(DT)
 library(ggrepel)
-library(mvtnorm)
 
-options(shiny.maxRequestSize = 600 * 1024^2)
+
+options(shiny.maxRequestSize = 800 * 1024^2)
 
 ui <- fluidPage(
   
@@ -45,7 +45,6 @@ ui <- fluidPage(
   ),
   
   mainPanel(
-    
     tabsetPanel(
       type = "tabs",
       
@@ -84,215 +83,234 @@ server <- function(input, output, session) {
     
     species <- input$species
     
-    data <- read.delim(
-      input$peptides$datapath,
-      sep = "\t",
-      header = TRUE
-    )
+    data <- read.delim(input$peptides$datapath, sep = "\t", header = TRUE)
     
-    required_cols <- c(
-      "Proteins",
-      "Sequence",
-      "Start.position",
-      "End.position"
-    )
+    required_cols <- c("Proteins","Sequence","Start.position","End.position")
     
     validate(
-      need(
-        all(required_cols %in% names(data)),
-        paste(
-          "Missing required columns:",
-          paste(setdiff(required_cols, names(data)), collapse = ", ")
-        )
-      )
+      need(all(required_cols %in% names(data)),
+           paste("Missing required columns:",
+                 paste(setdiff(required_cols, names(data)), collapse = ", ")))
     )
     
     peptides_filter <- data %>%
       dplyr::select(all_of(required_cols))
     
-    # ------------------- Extract peptides function -------------------
-    
-    extract_peptides <- function(data,
-                                 protein_id,
-                                 positions,
-                                 exclude_id = NULL) {
+    extract_peptides <- function(data, protein_id, positions, exclude_id = NULL) {
       
-      result <- data %>%
-        filter(grepl(protein_id, Proteins))
+      result <- data %>% filter(grepl(protein_id, Proteins))
       
       if (!is.null(exclude_id)) {
-        result <- result %>%
-          filter(!grepl(exclude_id, Proteins))
+        result <- result %>% filter(!grepl(exclude_id, Proteins))
       }
       
       for (pos in positions) {
-        result <- result %>%
-          filter(
-            Start.position <= pos &
-              End.position >= pos
-          )
+        result <- result %>% filter(Start.position <= pos & End.position >= pos)
       }
       
       result
     }
-    
-    # ------------------- Species logic -------------------
-    
-    if (species == "Homo sapiens & hominins (Q99217/Q99218)") {
-      
-      rv$protein_x <- "Q99217"
-      rv$protein_y <- "Q99218"
-      
-      AMELX <- extract_peptides(
-        data = peptides_filter,
-        protein_id = "Q99217",
-        positions = c(44, 45)
-      )
-      
-      AMELY <- extract_peptides(
-        data = peptides_filter,
-        protein_id = "Q99218",
-        positions = 45,
-        exclude_id = "Q99217"
-      )
-      
-      rv$peptides_raw <- list(
-        AMELX = AMELX,
-        AMELY = AMELY
-      )
-      
-      showNotification(
-        paste(
-          nrow(AMELX), "AMELX peptides detected |",
-          nrow(AMELY), "AMELY peptides detected"
-        ),
-        type = "message"
-      )
-      
-    } else if (species == "Bos taurus (P02817/Q99004)") {
-      
-      rv$protein_x <- "P02817"
-      rv$protein_y <- "Q99004"
-      
-      AMELX_44 <- extract_peptides(
-        data = peptides_filter,
-        protein_id = "P02817",
-        positions = 44,
-        exclude_id = "Q99004"
-      )
 
-      AMELX_48 <- extract_peptides(
-        data = peptides_filter,
-        protein_id = "P02817",
-        positions = 48,
-        exclude_id = "Q99004"
-      )
+  # ------------------- Species logic -------------------
 
-      AMELX <- bind_rows(AMELX_44, AMELX_48) %>%
-        distinct()
-
-      AMELY_44 <- extract_peptides(
-        data = peptides_filter,
-        protein_id = "Q99004",
-        positions = 44,
-        exclude_id = "P02817"
-      )
-
-      AMELY_48 <- extract_peptides(
-        data = peptides_filter,
-        protein_id = "Q99004",
-        positions = 48,
-        exclude_id = "P02817"
-      )
-
-      AMELY <- bind_rows(AMELY_44, AMELY_48) %>%
-        distinct()
-
-      rv$peptides_raw <- list(
-        AMELX = AMELX,
-        AMELY = AMELY
-      )
-      
-      showNotification(
-        paste(
-          nrow(AMELX), "AMELX peptides detected |",
-          nrow(AMELY), "AMELY peptides detected"
-        ),
-        type = "message"
-      )
-      
-    } else {
-      
-      rv$peptides_raw <- list(
-        AMELX = NULL,
-        AMELY = NULL
-      )
-      
-      showNotification(
-        "Currently only Homo sapiens & hominins and Bos taurus are supported.",
-        type = "warning"
-      )
-    }
-  })
+  extract_peptides <- function(data,
+                             protein_id,
+                             positions,
+                             residues = NULL,
+                             exclude_id = NULL) {
   
-  # ------------------- Load msms.txt and merge -------------------
+    result <- data %>%
+      filter(grepl(protein_id, Proteins))
+  
+    if (!is.null(exclude_id)) {
+      result <- result %>%
+        filter(!grepl(exclude_id, Proteins))
+    }
+  
+    for (pos in positions) {
+      result <- result %>%
+        filter(Start.position <= pos & End.position >= pos)
+    }
+  
+    if (!is.null(residues)) {
+      for (i in seq_along(positions)) {
+        pos <- positions[i]
+        aa  <- residues[i]
+      
+        result <- result %>%
+          rowwise() %>%
+          filter(
+            substr(
+              Sequence,
+              pos - Start.position + 1,
+              pos - Start.position + 1
+            ) == aa
+          ) %>%
+          ungroup()
+      }
+    }
+  
+    result
+  }
+
+  if (species == "Homo sapiens & hominins (Q99217/Q99218)") {
+  
+    rv$protein_x <- "Q99217"
+    rv$protein_y <- "Q99218"
+    
+    AMELX_44 <- extract_peptides(
+      peptides_filter,
+      protein_id = "Q99217",
+      positions  = c(44, 45),
+      residues   = c("S", "I")
+    )
+  
+    AMELX_28 <- extract_peptides(
+      peptides_filter,
+      protein_id = "Q99217",
+      positions  = c(28, 29),
+      residues   = c("S", "I")
+    )
+  
+    AMELX_58 <- extract_peptides(
+      peptides_filter,
+      protein_id = "Q99217",
+      positions  = c(58, 59),
+      residues   = c("S", "I")
+    )
+  
+    AMELX <- bind_rows(
+      AMELX_44,
+      AMELX_28,
+      AMELX_58
+    ) %>%
+      distinct()
+  
+    AMELY_45 <- extract_peptides(
+      peptides_filter,
+      protein_id = "Q99218",
+      positions  = 45,
+      residues   = "M",
+      exclude_id = "Q99217"
+    )
+  
+    AMELY_59 <- extract_peptides(
+      peptides_filter,
+      protein_id = "Q99218",
+      positions  = 59,
+      residues   = "M",
+      exclude_id = "Q99217"
+   )
+  
+    AMELY <- bind_rows(
+      AMELY_45,
+      AMELY_59
+    ) %>%
+      distinct()
+  
+    rv$peptides_raw <- list(
+      AMELX = AMELX,
+      AMELY = AMELY
+    )
+  
+    showNotification(
+      paste(
+        nrow(AMELX), "AMELX peptides detected |",
+        nrow(AMELY), "AMELY peptides detected"
+      ),
+      type = "message"
+    )
+  
+  } else if (species == "Bos taurus (P02817/Q99004)") {
+  
+    rv$protein_x <- "P02817"
+    rv$protein_y <- "Q99004"
+  
+    AMELX_44 <- extract_peptides(
+      peptides_filter,
+      protein_id = "P02817",
+      positions  = 44,
+      exclude_id = "Q99004"
+    )
+  
+    AMELX_48 <- extract_peptides(
+      peptides_filter,
+      protein_id = "P02817",
+      positions  = 48,
+      exclude_id = "Q99004"
+    )
+  
+    AMELX <- bind_rows(
+      AMELX_44,
+      AMELX_48
+    ) %>%
+      distinct()
+  
+    AMELY_44 <- extract_peptides(
+      peptides_filter,
+      protein_id = "Q99004",
+      positions  = 44,
+      exclude_id = "P02817"
+    )
+  
+    AMELY_48 <- extract_peptides(
+      peptides_filter,
+      protein_id = "Q99004",
+      positions  = 48,
+      exclude_id = "P02817"
+    )
+  
+    AMELY <- bind_rows(
+      AMELY_44,
+      AMELY_48
+    ) %>%
+      distinct()
+  
+    rv$peptides_raw <- list(
+      AMELX = AMELX,
+      AMELY = AMELY
+    )
+  
+    showNotification(
+      paste(
+        nrow(AMELX), "AMELX peptides detected |",
+        nrow(AMELY), "AMELY peptides detected"
+      ),
+      type = "message"
+    )
+  
+  } else {
+  
+    rv$peptides_raw <- list(
+      AMELX = NULL,
+      AMELY = NULL
+    )
+  
+    showNotification(
+      "Currently only Homo sapiens & hominins and Bos taurus are supported.",
+      type = "warning"
+    )
+  }
+    })
+  
+  # ------------------- Load msms.txt -------------------
   
   observeEvent(input$msms, {
     
     req(input$msms, rv$peptides_raw)
     
-    msms <- read.delim(
-      input$msms$datapath,
-      sep = "\t",
-      header = TRUE
-    )
+    msms <- read.delim(input$msms$datapath, sep = "\t", header = TRUE)
     
-    msms_filter <- msms[, c(
-      "Sequence",
-      "Precursor.Intensity",
-      "Raw.file",
-      "Proteins",
-      "PEP"
-    )]
+    msms_filter <- msms[, c("Sequence","Precursor.Intensity","Raw.file","Proteins","PEP")]
+    matches_col <- msms[, c("Sequence","Proteins","Matches")]
     
-    matches_col <- msms[, c(
-      "Sequence",
-      "Proteins",
-      "Matches"
-    )]
+    AMELX <- merge(rv$peptides_raw$AMELX, msms_filter, by = c("Sequence","Proteins"))
+    AMELY <- merge(rv$peptides_raw$AMELY, msms_filter, by = c("Sequence","Proteins"))
     
-    AMELX <- merge(
-      rv$peptides_raw$AMELX,
-      msms_filter,
-      by = c("Sequence", "Proteins")
-    )
-    
-    AMELY <- merge(
-      rv$peptides_raw$AMELY,
-      msms_filter,
-      by = c("Sequence", "Proteins")
-    )
-    
-    AMELX <- merge(
-      AMELX,
-      matches_col,
-      by = c("Sequence", "Proteins")
-    )
-    
-    AMELY <- merge(
-      AMELY,
-      matches_col,
-      by = c("Sequence", "Proteins"),
-      all.x = TRUE
-    )
+    AMELX <- merge(AMELX, matches_col, by = c("Sequence","Proteins"))
+    AMELY <- merge(AMELY, matches_col, by = c("Sequence","Proteins"), all.x = TRUE)
     
     if (nrow(AMELY) == 0) {
-      
-      showNotification(
-        "No AMELY peptides detected. Creating placeholder.",
-        type = "warning"
-      )
-      
       AMELY <- data.frame(
         Sequence = character(),
         Raw.file = character(),
@@ -304,94 +322,41 @@ server <- function(input, output, session) {
         PEP = numeric()
       )
     }
-    
-  # ------------------- Count b/y ions -------------------
 
-    count_ions <- function(m, t) {
-      
-      if (is.na(m) || m == "") return(0)
-      
-      sum(
-        grepl(
-          paste0("^", t, "\\d+$"),
-          unlist(strsplit(m, ";"))
-        )
-      )
+    # ------------------- Count b/y ions -------------------
+    
+    count_ions <- function(m,t){
+      if(is.na(m)||m=="") return(0)
+      sum(grepl(paste0("^",t,"\\d+$"), unlist(strsplit(m,";"))))
     }
     
     AMELX <- AMELX %>%
       rowwise() %>%
       mutate(
-        `b ions` = paste0(
-          count_ions(Matches, "b"),
-          "/",
-          nchar(Sequence)
-        ),
-        `y ions` = paste0(
-          count_ions(Matches, "y"),
-          "/",
-          nchar(Sequence)
-        )
-      ) %>%
-      ungroup()
+        `b ions` = paste0(count_ions(Matches,"b"),"/",nchar(Sequence)),
+        `y ions` = paste0(count_ions(Matches,"y"),"/",nchar(Sequence))
+      ) %>% ungroup()
     
     AMELY <- AMELY %>%
       rowwise() %>%
       mutate(
-        `b ions` = paste0(
-          count_ions(Matches, "b"),
-          "/",
-          nchar(Sequence)
-        ),
-        `y ions` = paste0(
-          count_ions(Matches, "y"),
-          "/",
-          nchar(Sequence)
-        )
-      ) %>%
-      ungroup()
+        `b ions` = paste0(count_ions(Matches,"b"),"/",nchar(Sequence)),
+        `y ions` = paste0(count_ions(Matches,"y"),"/",nchar(Sequence))
+      ) %>% ungroup()
     
     AMELX <- AMELX %>%
-      group_by(
-        Sequence,
-        Raw.file,
-        Proteins,
-        Start.position,
-        End.position,
-        PEP,
-        `b ions`,
-        `y ions`
-      ) %>%
-      summarise(
-        Precursor.Intensity = sum(Precursor.Intensity),
-        .groups = "drop"
-      )
+      group_by(Sequence,Raw.file,Proteins,Start.position,End.position,PEP,`b ions`,`y ions`) %>%
+      summarise(Precursor.Intensity=sum(Precursor.Intensity),.groups="drop")
     
     AMELY <- AMELY %>%
-      group_by(
-        Sequence,
-        Raw.file,
-        Proteins,
-        Start.position,
-        End.position,
-        PEP,
-        `b ions`,
-        `y ions`
-      ) %>%
-      summarise(
-        Precursor.Intensity = sum(Precursor.Intensity),
-        .groups = "drop"
-      )
+      group_by(Sequence,Raw.file,Proteins,Start.position,End.position,PEP,`b ions`,`y ions`) %>%
+      summarise(Precursor.Intensity=sum(Precursor.Intensity),.groups="drop")
     
     peptide_list <- rbind(AMELX, AMELY)
 
     # ------------------- Auto-uncheck PEP > 0.05 -------------------
-
-    peptide_list$Use <- ifelse(
-      peptide_list$PEP > 0.05,
-      FALSE,
-      TRUE
-    )
+    
+    peptide_list$Use <- ifelse(peptide_list$PEP > 0.05, FALSE, TRUE)
     
     rv$peptide_list <- peptide_list
     
@@ -399,15 +364,37 @@ server <- function(input, output, session) {
       split(.$Raw.file) %>%
       lapply(function(df) setNames(df$Use, seq_len(nrow(df))))
     
-    updateSelectInput(
-      session,
-      "raw_file_select",
-      choices = unique(peptide_list$Raw.file)
-    )
+    updateSelectInput(session, "raw_file_select",
+                       choices = unique(peptide_list$Raw.file))
   })
   
-  # ------------------- Peptide checkbox table -------------------
+  # ------------------- Print peptide counts in console -------------------
 
+  observeEvent(rv$peptide_list, {
+
+    req(rv$peptide_list)
+
+    cat("\n--- Peptide counts per protein per Raw file ---\n")
+
+    total_counts <- rv$peptide_list %>%
+      group_by(Raw.file, Proteins) %>%
+      summarise(total_peptides = n(), .groups = "drop")
+
+    print(total_counts, n = Inf)
+
+    cat("\n--- Peptide counts with PEP < 0.05 per protein per Raw file ---\n")
+
+    retained_counts <- rv$peptide_list %>%
+      filter(PEP < 0.05) %>%
+      group_by(Raw.file, Proteins) %>%
+      summarise(retained_peptides = n(), .groups = "drop")
+
+    print(retained_counts, n = Inf)
+
+  })
+
+  # ------------------- Peptide checkbox table -------------------
+  
   peptide_proxy <- dataTableProxy("peptide_table")
   
   output$peptide_table <- renderDT({
@@ -419,65 +406,33 @@ server <- function(input, output, session) {
     df <- rv$peptide_list %>%
       filter(Raw.file == selected_file)
     
-    if (is.null(rv$checkbox_states[[selected_file]])) {
-      rv$checkbox_states[[selected_file]] <- setNames(df$Use, seq_len(nrow(df)))
-    }
-    
     df_display <- df
     
     df_display$Add <- sapply(seq_len(nrow(df_display)), function(i) {
-      
       id <- paste0("chk_", selected_file, "_", i)
-      
-      checked <- ifelse(
-        isTRUE(rv$checkbox_states[[selected_file]][i]),
-        "checked",
-        ""
-      )
+      checked <- ifelse(isTRUE(rv$checkbox_states[[selected_file]][i]), "checked", "")
       
       sprintf(
         '<input type="checkbox" id="%s" %s onclick="Shiny.setInputValue(\'%s\', this.checked, {priority: \'event\'})">',
-        id,
-        checked,
-        id
+        id, checked, id
       )
     })
     
-    df_display <- df_display[, c(
-      "Add",
-      "Raw.file",
-      "Sequence",
-      "Proteins",
-      "Start.position",
-      "End.position",
-      "PEP",
-      "b ions",
-      "y ions"
-    )]
-    
-    datatable(
-      df_display,
-      escape = FALSE,
-      rownames = FALSE,
-      options = list(scrollX = TRUE)
-    )
+    datatable(df_display[, c("Add","Raw.file","Sequence","Proteins",
+                             "Start.position","End.position","PEP",
+                             "b ions","y ions")],
+              escape = FALSE, rownames = FALSE)
   })
   
-  # ------------------- Peptide checkbox table -------------------
-
+  
   observe({
     
     req(rv$peptide_list, input$raw_file_select)
     
     selected_file <- input$raw_file_select
+    df <- rv$peptide_list %>% filter(Raw.file == selected_file)
     
-    df <- rv$peptide_list %>%
-      filter(Raw.file == selected_file)
-    
-    n <- nrow(df)
-    
-    for (i in seq_len(n)) {
-      
+    for (i in seq_len(nrow(df))) {
       id <- paste0("chk_", selected_file, "_", i)
       
       if (!is.null(input[[id]])) {
@@ -488,131 +443,153 @@ server <- function(input, output, session) {
   
   # ------------------- Build summary table -------------------
 
-  observe({
-    
+  summary_table <- reactive({
+
     req(rv$peptide_list)
-    
-    all_raw <- unique(rv$peptide_list$Raw.file)
-    
-    df_list <- lapply(all_raw, function(raw_file) {
-      
-      df <- rv$peptide_list %>%
-        filter(Raw.file == raw_file)
-      
-      chk <- rv$checkbox_states[[raw_file]]
-      
-      df$Use <- chk
-      
-      df[df$Use == TRUE, ]
-    })
-    
-    df <- do.call(rbind, df_list)
-    
-    if (nrow(df) == 0) {
-      rv_table(data.frame())
-      return()
-    }
-    
-    AMELX <- df[grepl(rv$protein_x, df$Proteins), ]
-    AMELY <- df[grepl(rv$protein_y, df$Proteins), ]
-    
-    AMELX_int <- aggregate(
-      Precursor.Intensity ~ Raw.file + Proteins,
-      AMELX,
-      sum
+
+  raw_status <- rv$peptide_list %>%
+    group_by(Raw.file) %>%
+    summarise(
+      n_AMELX_raw = sum(grepl(rv$protein_x, Proteins)),
+      n_AMELY_raw = sum(grepl(rv$protein_y, Proteins)),
+      .groups = "drop"
     )
-    
-    AMELY_int <- aggregate(
-      Precursor.Intensity ~ Raw.file + Proteins,
-      AMELY,
-      sum
+
+  df <- rv$peptide_list %>%
+    filter(Use == TRUE)
+
+  if (nrow(df) == 0) {
+
+    return(
+      raw_status %>%
+        mutate(
+          AMELX = 0,
+          AMELY = 0,
+          logAMELX = 0,
+          logAMELY = 0,
+          `P(male)` = 0,
+          `Biological sex` = case_when(
+            n_AMELY_raw == 0 & n_AMELX_raw > 0 ~ "Female",
+            n_AMELY_raw > 0 ~ "Non-conclusive",
+            TRUE ~ "Non-conclusive"
+          ),
+          Label = ""
+        )
     )
-    
-    names(AMELX_int)[3] <- "Precursor.Intensity.AMELX"
-    names(AMELY_int)[3] <- "Precursor.Intensity.AMELY"
-    
-    df_sum <- merge(
-      AMELX_int,
-      AMELY_int,
-      by = "Raw.file",
-      all = TRUE
+  }
+
+  AMELX <- df %>%
+    filter(grepl(rv$protein_x, Proteins))
+
+  AMELY <- df %>%
+    filter(grepl(rv$protein_y, Proteins))
+
+  status <- df %>%
+    group_by(Raw.file) %>%
+    summarise(
+
+      AMELX_peptides = sum(grepl(rv$protein_x, Proteins)),
+      AMELY_peptides = sum(grepl(rv$protein_y, Proteins)),
+
+      AMELX_has_signal =
+        any(is.finite(Precursor.Intensity[grepl(rv$protein_x, Proteins)])),
+
+      AMELY_has_signal =
+        any(is.finite(Precursor.Intensity[grepl(rv$protein_y, Proteins)])),
+
+      .groups = "drop"
     )
-    
-    df_sum$`Protein X` <- df_sum$Proteins.x
-    df_sum$`Protein Y` <- df_sum$Proteins.y
-    
-    df_sum$logAMELX <- log(df_sum$Precursor.Intensity.AMELX)
-    
-    df_sum$logAMELY <- ifelse(
-      !is.na(df_sum$Precursor.Intensity.AMELY),
-      log(df_sum$Precursor.Intensity.AMELY),
-      0
-    )
-    
-    df_sum$`Biological sex` <- ifelse(
-      is.na(df_sum$Precursor.Intensity.AMELY) |
-        df_sum$Precursor.Intensity.AMELY == 0,
-      "Female",
-      "Male"
-    )
-    
-    male_idx <- which(df_sum$`Biological sex` == "Male")
-    
-    if (length(male_idx) > 1) {
-      
-      mu <- mean(df_sum$logAMELY[male_idx])
-      sigma <- sd(df_sum$logAMELY[male_idx])
-      
-      non_conclusive <- male_idx[
-        dnorm(
-          df_sum$logAMELY[male_idx],
-          mean = mu,
-          sd = sigma
-        ) < 0.05
-      ]
-      
-      df_sum$`Biological sex`[non_conclusive] <- "Non-conclusive"
-    }
-    
-    if (!"Label" %in% names(df_sum)) {
-      df_sum$Label <- ""
-    }
-    
-    rv_table(df_sum)
+
+    AMELX_int <- AMELX %>%
+      group_by(Raw.file) %>%
+      summarise(
+        AMELX = sum(
+          Precursor.Intensity[is.finite(Precursor.Intensity)],
+          na.rm = TRUE
+        ),
+        .groups = "drop"
+      )
+
+    AMELY_int <- AMELY %>%
+      group_by(Raw.file) %>%
+      summarise(
+        AMELY = sum(
+          Precursor.Intensity[is.finite(Precursor.Intensity)],
+          na.rm = TRUE
+        ),
+        .groups = "drop"
+      )
+
+    df_sum <- raw_status %>%
+      full_join(AMELX_int, by = "Raw.file") %>%
+      full_join(AMELY_int, by = "Raw.file") %>%
+      full_join(status, by = "Raw.file")
+
+    df_sum[is.na(df_sum)] <- 0
+
+    eps <- 1
+
+    df_sum <- df_sum %>%
+      mutate(
+        logAMELX = log(AMELX + eps),
+        logAMELY = log(AMELY + eps)
+      )
+
+    k <- 0.000001
+
+    df_sum <- df_sum %>%
+      mutate(
+        `P(male)` = 1 - exp(-k * AMELY)
+      )
+
+    df_sum <- df_sum %>%
+      mutate(
+        `Biological sex` = case_when(
+
+          n_AMELY_raw == 0 & n_AMELX_raw > 0 ~ "Female",
+
+          n_AMELY_raw > 0 & AMELY == 0 ~ "Non-conclusive",
+
+          (AMELX_peptides > 0 & !AMELX_has_signal) |
+            (AMELY_peptides > 0 & !AMELY_has_signal) ~ "Non-conclusive",
+
+          `P(male)` > 0.9 ~ "Male",
+
+          TRUE ~ "Non-conclusive"
+        ),
+
+        Label = ""
+      )
+
+    df_sum
+  })
+
+  observe({
+    rv_table(summary_table())
   })
   
   # ------------------- Table1 output -------------------
-
+  
   output$table1 <- renderDT({
     
     df <- rv_table()
-    
     req(df)
     
     df$logAMELX <- sprintf("%.3f", df$logAMELX)
     df$logAMELY <- sprintf("%.3f", df$logAMELY)
+    df$`P(male)` <- sprintf("%.3f", df$`P(male)`)
     
-    df <- df[, c(
-      "Raw.file",
-      "Label",
-      "Protein X",
-      "Protein Y",
-      "logAMELX",
-      "logAMELY",
-      "Biological sex"
-    )]
-    
-    datatable(
-      df,
-      rownames = FALSE,
-      editable = list(
+    datatable(df[, c("Raw.file","Label","logAMELX","logAMELY",
+                     "P(male)","Biological sex")],
+              rownames = FALSE,
+              editable = list(
         target = "cell",
-        disable = list(columns = c(0, 2, 3, 4, 5, 6))
+        disable = list(columns = c(0, 2, 3, 4, 5))
       ),
       options = list(scrollX = TRUE)
     )
   })
-  
+
   observeEvent(input$table1_cell_edit, {
     
     info <- input$table1_cell_edit
@@ -627,9 +604,10 @@ server <- function(input, output, session) {
     
     rv_table(df)
   })
+
   
   # ------------------- Plot -------------------
-
+  
   output$plot1 <- renderPlot({
     
     df <- rv_table()
@@ -675,12 +653,12 @@ server <- function(input, output, session) {
       ) +
       theme_minimal(base_size = 16)
   })
-  
-  # ------------------- Downloads -------------------
 
+  # ------------------- Downloads -------------------
+  
   output$downloadGraph <- downloadHandler(
     filename = function() {
-      paste0("graph-DDA-SexID-", Sys.Date(), ".tiff")
+      paste0("graph-SexPeptID-", Sys.Date(), ".tiff")
     },
     content = function(file) {
       ggsave(file, plot = last_plot(), width = 12, height = 8, device = "tiff")
@@ -689,30 +667,25 @@ server <- function(input, output, session) {
   
   output$downloadTable <- downloadHandler(
     filename = function() {
-      paste0("table-DDA-SexID-", Sys.Date(), ".csv")
+      paste0("table-SexPeptID-", Sys.Date(), ".csv")
     },
     content = function(file) {
-    
+      
       df <- rv_table()
       req(df)
-    
-      # même transformation que table1
-      df$logAMELX <- sprintf("%.3f", df$logAMELX)
-      df$logAMELY <- sprintf("%.3f", df$logAMELY)
-    
+      
       df <- df[, c(
         "Raw.file",
         "Label",
-        "Protein X",
-        "Protein Y",
         "logAMELX",
         "logAMELY",
+        "P(male)",
         "Biological sex"
       )]
-    
+      
       write.csv(df, file, row.names = FALSE)
-  }
-)
+    }
+  )
 }
 
 shinyApp(ui, server)
